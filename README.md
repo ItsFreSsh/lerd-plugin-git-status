@@ -9,10 +9,13 @@ It is read-only and never runs `git fetch`, so ahead/behind reflects your last f
 
 ## Install
 
+From the terminal:
+
 ```sh
-git clone <this repository> git-status
-lerd plugin install "$PWD/git-status"
+lerd plugin install https://github.com/ItsFreSsh/lerd-plugin-git-status.git
 ```
+
+Or from the lerd dashboard: open **Plugins → Install from folder or git** and paste the URL above.
 
 Then switch the card on per site, from the site's header in the dashboard or in the project folder:
 
@@ -51,9 +54,18 @@ lerd 1.39 or newer, on Linux or macOS, with `git`, `curl`, `jq` and `column` on 
 | `bin/show` | The console command |
 | `ui/card.html` | The Overview card |
 
+## Updating
+
+A plugin installed from git does not update on its own. To get the latest version, remove it (its data is kept) and install it again:
+
+```sh
+lerd plugin remove git-status
+lerd plugin install https://github.com/ItsFreSsh/lerd-plugin-git-status.git
+```
+
 ## Development
 
-The installed copy does not follow this folder. After a change:
+Install from a local clone; the installed copy does not follow the folder, so reinstall after a change:
 
 ```sh
 lerd plugin remove git-status && lerd plugin install "$PWD"
