@@ -1,0 +1,24 @@
+api_version: 1
+name: git-status
+lerd: ">=1.39"
+version: 0.1.0
+description: Branch, ahead/behind and uncommitted changes on a site's Overview
+docs: DOCS.md
+icon: ui/icon.svg
+
+requires: [git, curl, jq, column]
+
+commands:
+  - name: show
+    usage: "Git state of this project, a site (--project=<site>), or every site (--all)"
+    run: bin/show
+
+api:
+  - path: status
+    methods: [GET]
+    run: bin/status
+
+ui:
+  overview_card:
+    title: Git status
+    entry: ui/card.html

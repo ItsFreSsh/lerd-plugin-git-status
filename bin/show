@@ -1,0 +1,127 @@
+#!/bin/sh
+# lerd git-status:show [site] [--project=<site>] [--all]
+set -e
+
+usage() {
+  cat <<'USAGE'
+Usage: lerd git-status:show [site]
+       lerd git-status:show --project=<site>
+       lerd git-status:show --all
+
+Shows the git state of a lerd site: the current project when run inside one,
+the named site, or a one-line summary of every site with --all.
+It never fetches, so ahead/behind reflects your last git fetch.
+USAGE
+}
+
+project=""
+all=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -a|--all) all=1 ;;
+    --project=*) project="${1#--project=}" ;;
+    -p|--project)
+      [ $# -ge 2 ] || { echo "--project needs a site name" >&2; exit 2; }
+      project="$2"; shift ;;
+    -*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *) [ -z "$project" ] || { echo "Give one site only" >&2; exit 2; }
+       project="$1" ;;
+  esac
+  shift
+done
+
+if [ -t 1 ]; then
+  B=$(printf '\033[1m'); D=$(printf '\033[2m'); G=$(printf '\033[32m')
+  Y=$(printf '\033[33m'); R=$(printf '\033[31m'); C=$(printf '\033[36m'); N=$(printf '\033[0m')
+else
+  B=""; D=""; G=""; Y=""; R=""; C=""; N=""
+fi
+
+# Prints "name<TAB>path" for every lerd site, from lerd's own API.
+sites() {
+  curl -fsS -H "X-Lerd-Plugin-Token: $LERD_API_TOKEN" "$LERD_API_URL/api/sites" \
+    | jq -r '(if type == "array" then . else .sites end)[] | [.name, .path] | @tsv'
+}
+
+state() {
+  "$LERD_PLUGIN_DIR/bin/gitstate" "$1"
+}
+
+# Detailed view of one checkout: $1 site name, $2 path.
+detail() {
+  state "$2" | jq -r \
+    --arg name "$1" --arg path "$2" \
+    --arg B "$B" --arg D "$D" --arg G "$G" --arg Y "$Y" --arg R "$R" --arg C "$C" --arg N "$N" '
+    "\($B)\($name)\($N) \($D)\($path)\($N)",
+    if .repo | not then "  \($D)not a git repository\($N)" else
+      "  branch    \($C)\(if .branch == "(detached)" then "detached HEAD" else .branch end)\($N)"
+        + (if .upstream == "" then " \($D)(no upstream)\($N)" else " \($D)→ \(.upstream)\($N)" end),
+      "  sync      " + (
+        if .upstream == "" then "\($D)-\($N)"
+        elif .ahead == 0 and .behind == 0 then "\($G)in sync\($N)"
+        else [ (if .ahead > 0 then "\($Y)↑\(.ahead) ahead\($N)" else empty end),
+               (if .behind > 0 then "\($Y)↓\(.behind) behind\($N)" else empty end) ] | join(", ")
+        end),
+      "  changes   " + (
+        if (.staged + .modified + .untracked + .conflicts) == 0 then "\($G)clean\($N)"
+        else [ (if .conflicts > 0 then "\($R)\(.conflicts) conflicted\($N)" else empty end),
+               (if .staged > 0 then "\(.staged) staged" else empty end),
+               (if .modified > 0 then "\($Y)\(.modified) modified\($N)" else empty end),
+               (if .untracked > 0 then "\(.untracked) untracked" else empty end) ] | join(", ")
+        end),
+      (if .stash > 0 then "  stash     \(.stash)" else empty end),
+      (if .last.sha != "" then "  last      \($D)\(.last.sha)\($N) \(.last.subject) \($D)(\(.last.when))\($N)" else empty end)
+    end'
+}
+
+# One-line summary of a checkout, tab-separated for column alignment.
+summary() {
+  state "$2" | jq -r --arg name "$1" '
+    if .repo | not then [$name, "-", "-", "not a git repository"] else
+      [ $name,
+        (if .branch == "(detached)" then "detached" else .branch end),
+        (if .upstream == "" then "no upstream"
+         elif .ahead == 0 and .behind == 0 then "in sync"
+         else [ (if .ahead > 0 then "↑\(.ahead)" else empty end),
+                (if .behind > 0 then "↓\(.behind)" else empty end) ] | join(" ") end),
+        (if (.staged + .modified + .untracked + .conflicts) == 0 then "clean"
+         else [ (if .conflicts > 0 then "\(.conflicts)!" else empty end),
+                (if .staged > 0 then "\(.staged)S" else empty end),
+                (if .modified > 0 then "\(.modified)M" else empty end),
+                (if .untracked > 0 then "\(.untracked)?" else empty end) ] | join(" ") end)
+        + (if .stash > 0 then "  (\(.stash) stashed)" else "" end)
+      ]
+    end | @tsv'
+}
+
+if [ "$all" -eq 1 ]; then
+  [ -z "$project" ] || { echo "Use either --all or a site name, not both" >&2; exit 2; }
+  {
+    printf 'SITE\tBRANCH\tSYNC\tCHANGES\n'
+    sites | while IFS="$(printf '\t')" read -r name path; do
+      summary "$name" "$path"
+    done
+  } | column -t -s "$(printf '\t')"
+  printf '%sS staged, M modified, ? untracked, ! conflicted. Not fetched.%s\n' "$D" "$N"
+  exit 0
+fi
+
+if [ -n "$project" ]; then
+  path=$(sites | awk -F'\t' -v n="$project" '$1 == n { print $2; exit }')
+  if [ -z "$path" ]; then
+    echo "No lerd site named '$project'. Known sites:" >&2
+    sites | cut -f1 | sed 's/^/  /' >&2
+    exit 1
+  fi
+  detail "$project" "$path"
+  exit 0
+fi
+
+if [ -n "$LERD_SITE_PATH" ]; then
+  detail "${LERD_SITE:-$(basename "$LERD_SITE_PATH")}" "$LERD_SITE_PATH"
+  exit 0
+fi
+
+echo "Not inside a lerd project. Pass a site name, --project=<site> or --all." >&2
+exit 2

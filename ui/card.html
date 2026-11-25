@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Git status</title>
+  <style>
+    body { margin: 0; padding: 10px 14px; font-size: 13px; }
+    .line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .line + .line { margin-top: 6px; }
+    .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+    button { margin-left: auto; }
+  </style>
+</head>
+<body>
+  <div id="out" class="lerd-muted">Loading…</div>
+  <script src="lerd.js"></script>
+  <script>
+    const out = document.getElementById('out');
+
+    function el(tag, cls, text) {
+      const node = document.createElement(tag);
+      if (cls) node.className = cls;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function pill(text, kind) {
+      return el('span', 'lerd-pill' + (kind ? ' ' + kind : ''), text);
+    }
+
+    function render(s) {
+      out.replaceChildren();
+      out.className = '';
+      if (!s.repo) {
+        out.append(el('span', 'lerd-muted', 'Not a git repository'));
+        return;
+      }
+
+      const top = el('div', 'line');
+      top.append(pill(s.branch === '(detached)' ? 'detached HEAD' : s.branch, 'accent'));
+      if (!s.upstream) {
+        top.append(pill('no upstream'));
+      } else if (!s.ahead && !s.behind) {
+        top.append(pill('in sync with ' + s.upstream, 'ok'));
+      } else {
+        if (s.ahead) top.append(pill('↑ ' + s.ahead + ' ahead', 'warn'));
+        if (s.behind) top.append(pill('↓ ' + s.behind + ' behind', 'warn'));
+      }
+
+      const dirty = s.staged + s.modified + s.untracked + s.conflicts;
+      if (s.conflicts) top.append(pill(s.conflicts + ' conflicted', 'bad'));
+      if (!dirty) {
+        top.append(pill('clean', 'ok'));
+      } else {
+        if (s.staged) top.append(pill(s.staged + ' staged'));
+        if (s.modified) top.append(pill(s.modified + ' modified', 'warn'));
+        if (s.untracked) top.append(pill(s.untracked + ' untracked'));
+      }
+      if (s.stash) top.append(pill(s.stash + ' stashed'));
+
+      const refresh = el('button', '', 'Refresh');
+      refresh.addEventListener('click', load);
+      top.append(refresh);
+      out.append(top);
+
+      if (s.last && s.last.sha) {
+        const last = el('div', 'line');
+        last.append(el('span', 'lerd-mono lerd-muted', s.last.sha));
+        last.append(el('span', 'subject', s.last.subject));
+        last.append(el('span', 'lerd-muted', s.last.when));
+        out.append(last);
+      }
+    }
+
+    function load() {
+      lerd.api('status?site=' + encodeURIComponent(lerd.context.site))
+        .then((text) => render(typeof text === 'string' ? JSON.parse(text) : text))
+        .catch((err) => { out.className = 'lerd-muted'; out.textContent = err.message; });
+    }
+
+    load();
+  </script>
+</body>
+</html>

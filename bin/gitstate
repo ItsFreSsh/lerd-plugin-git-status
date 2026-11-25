@@ -1,0 +1,33 @@
+#!/bin/sh
+# Usage: gitstate <dir>
+# Prints the git state of a checkout as JSON. Read-only: it never fetches, so
+# ahead/behind is relative to the last fetch. Shared by bin/status and bin/show.
+set -e
+
+dir="$1"
+if [ -z "$dir" ] || ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo '{"repo": false}'
+  exit 0
+fi
+
+{
+  git -C "$dir" status --porcelain=v2 --branch 2>/dev/null
+  # Last commit as a single tab-separated line; may be absent in an empty repo.
+  git -C "$dir" log -1 --format='#last	%h	%cr	%s' 2>/dev/null || true
+  git -C "$dir" stash list 2>/dev/null | awk 'END { print "#stash\t" NR }'
+} | awk -F'\t' '
+  function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/[\001-\037]/, " ", s); return s }
+  BEGIN { branch = ""; upstream = ""; ahead = 0; behind = 0; staged = 0; modified = 0; untracked = 0; conflicts = 0; stash = 0 }
+  /^# branch\.head / { branch = substr($0, 15) }
+  /^# branch\.upstream / { upstream = substr($0, 19) }
+  /^# branch\.ab / { split($0, ab, " "); ahead = substr(ab[3], 2) + 0; behind = substr(ab[4], 2) + 0 }
+  /^[12] / { xy = substr($0, 3, 2); if (substr(xy, 1, 1) != ".") staged++; if (substr(xy, 2, 1) != ".") modified++ }
+  /^u / { conflicts++ }
+  /^\? / { untracked++ }
+  /^#last\t/ { sha = $2; when = $3; subject = $4 }
+  /^#stash\t/ { stash = $2 + 0 }
+  END {
+    printf "{\"repo\": true, \"branch\": \"%s\", \"upstream\": \"%s\", \"ahead\": %d, \"behind\": %d, ", esc(branch), esc(upstream), ahead, behind
+    printf "\"staged\": %d, \"modified\": %d, \"untracked\": %d, \"conflicts\": %d, \"stash\": %d, ", staged, modified, untracked, conflicts, stash
+    printf "\"last\": {\"sha\": \"%s\", \"when\": \"%s\", \"subject\": \"%s\"}}\n", esc(sha), esc(when), esc(subject)
+  }'
